@@ -1,0 +1,101 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "build",
+            "command": "dotnet",
+            "type": "process",
+            "args": [
+                "build",
+                "${workspaceFolder}/NetCoreVstHost.csproj"
+            ],
+            "problemMatcher": "$msCompile"
+        },
+        {
+            "label": "dotnet version",
+            "command": "dotnet",
+            "args": [
+                "--version"
+            ],
+            "type": "shell",
+            "presentation": {
+                "reveal": "always",
+                "panel": "new",
+                "focus": true
+            },
+            "problemMatcher": "$msCompile"
+        },
+        {
+            "label": "publish release win-x64",
+            "command": "dotnet",
+            "args": [
+                "publish",
+                "--configuration",
+                "Release",
+                "--runtime",
+                "win-x64"
+            ],
+            "type": "shell",
+            "presentation": {
+                "reveal": "always",
+                "panel": "new",
+                "focus": true
+            },
+            "problemMatcher": "$msCompile"
+        },
+        {
+            "label": "publish debug win-x64",
+            "command": "dotnet",
+            "args": [
+                "publish",
+                "--configuration",
+                "Debug",
+                "--runtime",
+                "win-x64"
+            ],
+            "type": "shell",
+            "presentation": {
+                "reveal": "always",
+                "panel": "new",
+                "focus": true
+            },
+            "problemMatcher": "$msCompile"
+        },
+        {
+            "label": "publish release linux-x64",
+            "command": "dotnet",
+            "args": [
+                "publish",
+                "--configuration",
+                "Release",
+                "--runtime",
+                "linux-x64"
+            ],
+            "type": "shell",
+            "presentation": {
+                "reveal": "always",
+                "panel": "new",
+                "focus": true
+            },
+            "problemMatcher": "$msCompile"
+        },
+        {
+            "label": "publish debug linux-x64",
+            "command": "dotnet",
+            "args": [
+                "publish",
+                "--configuration",
+                "Debug",
+                "--runtime",
+                "linux-x64"
+            ],
+            "type": "shell",
+            "presentation": {
+                "reveal": "always",
+                "panel": "new",
+                "focus": true
+            },
+            "problemMatcher": "$msCompile"
+        }
+    ]
+}
