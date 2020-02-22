@@ -57,6 +57,22 @@ namespace NetCoreVstHost
         }
     }
 
+    /// <summary>
+    /// tresult wrapper
+    /// </summary>    
+    public enum tresult
+    {
+        kNoInterface = unchecked((int)0x80004002),  // E_NOINTERFACE
+        kResultOk = unchecked((int)0x00000000), // S_OK
+        kResultTrue = kResultOk,
+        kResultFalse = unchecked((int)0x00000001),  // S_FALSE
+        kInvalidArgument = unchecked((int)0x80070057),  // E_INVALIDARG
+        kNotImplemented = unchecked((int)0x80004001),   // E_NOTIMPL
+        kInternalError = unchecked((int)0x80004005),    // E_FAIL
+        kNotInitialized = unchecked((int)0x8000FFFF),   // E_UNEXPECTED
+        kOutOfMemory = unchecked((int)0x8007000EL)		// E_OUTOFMEMORY        
+    }
+
     #region Structs
 
     // https://docs.microsoft.com/en-us/dotnet/framework/interop/default-marshaling-for-strings
@@ -73,7 +89,8 @@ namespace NetCoreVstHost
     // TCHAR * f1;                      => [MarshalAs(UnmanagedType.LPTStr)] public string f1;
     // TCHAR   f2[256];                 => [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 256)] public string f2;
 
-    public enum FactoryFlags : Int32
+    [Flags]
+    public enum FactoryFlags
     {
         kNoFlags = 0,		         ///< Nothing
 		kClassesDiscardable = 1 << 0,	///< The number of exported classes can change each time the Module is loaded. If this flag is set, the host does not cache class information. This leads to a longer startup time because the host always has to load the Module to get the current class information.
@@ -81,6 +98,16 @@ namespace NetCoreVstHost
 		kComponentNonDiscardable = 1 << 3,	///< Component won't be unloaded until process exit
 		kUnicode = 1 << 4    ///< Components have entirely unicode encoded strings. (True for VST 3 Plug-ins so far)
 	};
+
+    //------------------------------------------------------------------------
+    /** Component Flags used as classFlags in PClassInfo2 */
+    //------------------------------------------------------------------------
+    [Flags]
+    public enum ComponentFlags
+    {
+        kDistributable = 1 << 0,    ///< Component can be run on remote computer
+        kSimpleModeSupported = 1 << 1   ///< Component supports simple IO mode (or works in simple mode anyway) see \ref vst3IoMode
+    };
 
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Ansi)] // charset is Ansi not Unicode
     public struct PFactoryInfo
@@ -91,7 +118,7 @@ namespace NetCoreVstHost
         [MarshalAs(UnmanagedType.I4)] public FactoryFlags flags; ///< (see above)
     }
 
-    public enum ClassCardinality : Int32
+    public enum ClassCardinality
     {
         kManyInstances = 0x7FFFFFFF
     };
@@ -115,13 +142,12 @@ namespace NetCoreVstHost
         [MarshalAs(UnmanagedType.I4)] public ClassCardinality cardinality; ///< cardinality of the class, set to kManyInstances (see \ref ClassCardinality)
         [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)] public string category; ///< class category, host uses this to categorize interfaces
         [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 64)] public string name; ///< class name, visible to the user
-        [MarshalAs(UnmanagedType.U4)] public int classFlags; ///< flags used for a specific category, must be defined where category is defined
+        [MarshalAs(UnmanagedType.I4)] public ComponentFlags classFlags; ///< flags used for a specific category, must be defined where category is defined
         [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)] public string subCategories;  ///< module specific subcategories, can be more than one, logically added by the \c OR operator
         [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 64)] public string vendor; ///< overwrite vendor information from factory info
         [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 64)] public string version; ///< Version string (e.g. "1.0.0.512" with Major.Minor.Subversion.Build)
         [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 64)] public string sdkVersion;	///< SDK version used to build this class (e.g. "VST 3.0")
     }
-
 
     [StructLayout(LayoutKind.Sequential)]
     public class FUnknown
@@ -130,7 +156,7 @@ namespace NetCoreVstHost
         /** Query for a pointer to the specified interface.
         Returns kResultOk on success or kNoInterface if the object does not implement the interface.
         The object has to call addRef when returning an interface.
-        \param _iid : (in) 16 Byte interface identifier (-> FUID)
+        \param iid : (in) 16 Byte interface identifier (-> FUID)
         \param obj : (out) On return, *obj points to the requested interface */
         public IntPtr queryInterface;
 
@@ -221,7 +247,8 @@ namespace NetCoreVstHost
         kAux                        ///< auxiliary bus (sidechain)
     };
 
-    public enum BusFlags : Int32
+    [Flags]
+    public enum BusFlags
     {
         kDefaultActive = 1 << 0     ///< bus active per default
 	};
@@ -432,8 +459,9 @@ namespace NetCoreVstHost
     public delegate IntPtr IPluginFactoryGetClassInfoDelegate(IntPtr thisPtr, int index, [In, Out] ref PClassInfo info);
 
     [UnmanagedFunctionPointer(CallingConvention.ThisCall)]
-    // public delegate IntPtr IPluginFactoryCreateInstanceDelegate(IntPtr thisPtr, string cid, string _iid, ref IntPtr obj);
-    public delegate IntPtr IPluginFactoryCreateInstanceDelegate(IntPtr thisPtr, byte[] cid, byte[] _iid, ref IntPtr obj);
+    // FIDString = char8*
+    // public delegate IntPtr IPluginFactoryCreateInstanceDelegate(IntPtr thisPtr, string cid, string iid, ref IntPtr obj);
+    public delegate IntPtr IPluginFactoryCreateInstanceDelegate(IntPtr thisPtr, byte[] cid, byte[] iid, ref IntPtr obj);
 
 
     // IPluginFactory2
@@ -443,62 +471,116 @@ namespace NetCoreVstHost
 
     // FUnknown
     [UnmanagedFunctionPointer(CallingConvention.ThisCall)]
-    // public delegate int FUnknownQueryInterfaceDelegate(IntPtr thisPtr, [MarshalAs(UnmanagedType.LPStr)] ref string _iid, IntPtr obj);
-    public delegate int FUnknownQueryInterfaceDelegate(IntPtr thisPtr, byte[] _iid, ref IntPtr obj);
+    // public delegate tresult FUnknownQueryInterfaceDelegate(IntPtr thisPtr, [MarshalAs(UnmanagedType.LPStr)] ref string iid, IntPtr obj);
+    public delegate tresult FUnknownQueryInterfaceDelegate(IntPtr thisPtr, byte[] iid, ref IntPtr obj);
 
     [UnmanagedFunctionPointer(CallingConvention.ThisCall)]
-    public delegate int FUnknownAddRefDelegate(IntPtr thisPtr);
+    public delegate tresult FUnknownAddRefDelegate(IntPtr thisPtr);
 
     [UnmanagedFunctionPointer(CallingConvention.ThisCall)]
-    public delegate int FUnknownReleaseDelegate(IntPtr thisPtr);
+    public delegate tresult FUnknownReleaseDelegate(IntPtr thisPtr);
 
 
     // IPluginBase
     [UnmanagedFunctionPointer(CallingConvention.ThisCall)]
-    // public delegate int IPluginBaseInitializeDelegate(IntPtr thisPtr, [In, Out] FUnknown[] context);
-    public delegate int IPluginBaseInitializeDelegate(IntPtr thisPtr, [In, Out] ref IntPtr context);
+    // public delegate tresult IPluginBaseInitializeDelegate(IntPtr thisPtr, [In, Out] FUnknown[] context);
+    public delegate tresult IPluginBaseInitializeDelegate(IntPtr thisPtr, [In, Out] ref IntPtr context);
 
     [UnmanagedFunctionPointer(CallingConvention.ThisCall)]
-    public delegate int IPluginBaseTerminateDelegate(IntPtr thisPtr);
+    public delegate tresult IPluginBaseTerminateDelegate(IntPtr thisPtr);
 
 
     // IComponent
     [UnmanagedFunctionPointer(CallingConvention.ThisCall)]
-    // public delegate int IComponentGetControllerClassIdDelegate(IntPtr thisPtr, [MarshalAs(UnmanagedType.LPStr)] StringBuilder classId);
-    public delegate int IComponentGetControllerClassIdDelegate(IntPtr thisPtr, byte[] classId);
+    // public delegate tresult IComponentGetControllerClassIdDelegate(IntPtr thisPtr, [MarshalAs(UnmanagedType.LPStr)] StringBuilder classId);
+    public delegate tresult IComponentGetControllerClassIdDelegate(IntPtr thisPtr, byte[] classId);
     [UnmanagedFunctionPointer(CallingConvention.ThisCall)]
-    public delegate int IComponentSetIoModeDelegate(IntPtr thisPtr, IoModes mode);
+    public delegate tresult IComponentSetIoModeDelegate(IntPtr thisPtr, IoModes mode);
     [UnmanagedFunctionPointer(CallingConvention.ThisCall)]
     public delegate int IComponentGetBusCountDelegate(IntPtr thisPtr, MediaTypes type, BusDirections dir);
     [UnmanagedFunctionPointer(CallingConvention.ThisCall)]
-    public delegate int IComponentGetBusInfoDelegate(IntPtr thisPtr, MediaTypes type, BusDirections dir, int index, [In, Out] ref BusInfo bus);
+    public delegate tresult IComponentGetBusInfoDelegate(IntPtr thisPtr, MediaTypes type, BusDirections dir, int index, [In, Out] ref BusInfo bus);
     [UnmanagedFunctionPointer(CallingConvention.ThisCall)]
-    public delegate int IComponentGetRoutingInfoDelegate(IntPtr thisPtr, [In, Out] ref RoutingInfo inInfo, [In, Out] ref RoutingInfo outInfo);
+    public delegate tresult IComponentGetRoutingInfoDelegate(IntPtr thisPtr, [In, Out] ref RoutingInfo inInfo, [In, Out] ref RoutingInfo outInfo);
     [UnmanagedFunctionPointer(CallingConvention.ThisCall)]
-    public delegate int IComponentActivateBusDelegate(IntPtr thisPtr, MediaTypes type, BusDirections dir, Int32 index, bool state);
+    public delegate tresult IComponentActivateBusDelegate(IntPtr thisPtr, MediaTypes type, BusDirections dir, Int32 index, bool state);
     [UnmanagedFunctionPointer(CallingConvention.ThisCall)]
-    public delegate int IComponentSetActiveDelegate(IntPtr thisPtr, bool state);
+    public delegate tresult IComponentSetActiveDelegate(IntPtr thisPtr, bool state);
     [UnmanagedFunctionPointer(CallingConvention.ThisCall)]
-    public delegate int IComponentSetStateDelegate(IntPtr thisPtr, IBStream state);
+    public delegate tresult IComponentSetStateDelegate(IntPtr thisPtr, IBStream state);
     [UnmanagedFunctionPointer(CallingConvention.ThisCall)]
-    public delegate int IComponentGetStateDelegate(IntPtr thisPtr, IBStream state);
+    public delegate tresult IComponentGetStateDelegate(IntPtr thisPtr, IBStream state);
 
 
     // IBStream
     [UnmanagedFunctionPointer(CallingConvention.ThisCall)]
-    public delegate int IBStreamReadDelegate(IntPtr thisPtr, IntPtr buffer, Int32 numBytes, IntPtr numBytesRead);
+    public delegate tresult IBStreamReadDelegate(IntPtr thisPtr, IntPtr buffer, Int32 numBytes, IntPtr numBytesRead);
     [UnmanagedFunctionPointer(CallingConvention.ThisCall)]
-    public delegate int IBStreamWriteDelegate(IntPtr thisPtr, IntPtr buffer, Int32 numBytes, IntPtr numBytesWritten);
+    public delegate tresult IBStreamWriteDelegate(IntPtr thisPtr, IntPtr buffer, Int32 numBytes, IntPtr numBytesWritten);
     [UnmanagedFunctionPointer(CallingConvention.ThisCall)]
-    public delegate int IBStreamSeekDelegate(IntPtr thisPtr, Int64 pos, Int32 mode, IntPtr result);
+    public delegate tresult IBStreamSeekDelegate(IntPtr thisPtr, Int64 pos, Int32 mode, IntPtr result);
     [UnmanagedFunctionPointer(CallingConvention.ThisCall)]
-    public delegate int IBStreamTellDelegate(IntPtr thisPtr, IntPtr pos);
+    public delegate tresult IBStreamTellDelegate(IntPtr thisPtr, IntPtr pos);
     #endregion
 
     class Program
     {
+        // ivstaudioprocessor.h
+
+        // Category Name for Audio Processor Component
         const string kVstAudioEffectClass = "Audio Module Class";
 
+        // Plug-in Type used for subCategories 
+        const string kFxAnalyzer = "Fx|Analyzer";   ///< Scope, FFT-Display, Loudness Processing...
+        const string kFxDelay = "Fx|Delay";     ///< Delay, Multi-tap Delay, Ping-Pong Delay...
+        const string kFxDistortion = "Fx|Distortion";   ///< Amp Simulator, Sub-Harmonic, SoftClipper...
+        const string kFxDynamics = "Fx|Dynamics";   ///< Compressor, Expander, Gate, Limiter, Maximizer, Tape Simulator, EnvelopeShaper...
+        const string kFxEQ = "Fx|EQ";           ///< Equalization, Graphical EQ...
+        const string kFxFilter = "Fx|Filter";       ///< WahWah, ToneBooster, Specific Filter,...
+        const string kFx = "Fx";                ///< others type (not categorized)
+        const string kFxInstrument = "Fx|Instrument";   ///< Fx which could be loaded as Instrument too
+        const string kFxInstrumentExternal = "Fx|Instrument|External";  ///< Fx which could be loaded as Instrument too and is external (wrapped Hardware)
+        const string kFxSpatial = "Fx|Spatial";     ///< MonoToStereo, StereoEnhancer,...
+        const string kFxGenerator = "Fx|Generator"; ///< Tone Generator, Noise Generator...
+        const string kFxMastering = "Fx|Mastering"; ///< Dither, Noise Shaping,...
+        const string kFxModulation = "Fx|Modulation";   ///< Phaser, Flanger, Chorus, Tremolo, Vibrato, AutoPan, Rotary, Cloner...
+        const string kFxPitchShift = "Fx|Pitch Shift";  ///< Pitch Processing, Pitch Correction, Vocal Tuning...
+        const string kFxRestoration = "Fx|Restoration"; ///< Denoiser, Declicker,...
+        const string kFxReverb = "Fx|Reverb";       ///< Reverberation, Room Simulation, Convolution Reverb...
+        const string kFxSurround = "Fx|Surround";   ///< dedicated to surround processing: LFE Splitter, Bass Manager...
+        const string kFxTools = "Fx|Tools";     ///< Volume, Mixer, Tuner...
+        const string kFxNetwork = "Fx|Network";     ///< using Network
+
+        const string kInstrument = "Instrument";            ///< Effect used as instrument (sound generator), not as insert
+        const string kInstrumentDrum = "Instrument|Drum";   ///< Instrument for Drum sounds
+        const string kInstrumentExternal = "Instrument|External";///< External Instrument (wrapped Hardware)
+        const string kInstrumentPiano = "Instrument|Piano"; ///< Instrument for Piano sounds
+        const string kInstrumentSampler = "Instrument|Sampler"; ///< Instrument based on Samples
+        const string kInstrumentSynth = "Instrument|Synth"; ///< Instrument based on Synthesis
+        const string kInstrumentSynthSampler = "Instrument|Synth|Sampler";  ///< Instrument based on Synthesis and Samples
+
+        const string kSpatial = "Spatial";      ///< used for SurroundPanner
+        const string kSpatialFx = "Spatial|Fx";     ///< used for SurroundPanner and as insert effect
+        const string kOnlyRealTime = "OnlyRT";          ///< indicates that it supports only realtime process call, no processing faster than realtime
+        const string kOnlyOfflineProcess = "OnlyOfflineProcess";    ///< used for Plug-in offline processing  (will not work as normal insert Plug-in)
+        const string kNoOfflineProcess = "NoOfflineProcess";    ///< will be NOT used for Plug-in offline processing (will work as normal insert Plug-in)
+        const string kUpDownMix = "Up-Downmix";     ///< used for Mixconverter/Up-Mixer/Down-Mixer
+        const string kAnalyzer = "Analyzer";        ///< Meter, Scope, FFT-Display, not selectable as insert plugin
+        const string kAmbisonics = "Ambisonics";        ///< used for Ambisonics channel (FX or Panner/Mixconverter/Up-Mixer/Down-Mixer when combined with other category)
+
+        const string kMono = "Mono";            ///< used for Mono only Plug-in [optional]
+        const string kStereo = "Stereo";            ///< used for Stereo only Plug-in [optional]
+        const string kSurround = "Surround";        ///< used for Surround only Plug-in [optional]
+
+        // FUIDs
+        static readonly byte[] FUnknownFUID = new byte[] { 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46 };
+        static readonly byte[] IComponentFUID = new byte[] { 0xE8, 0x31, 0xFF, 0x31, 0xF2, 0xD5, 0x43, 0x01, 0x92, 0x8E, 0xBB, 0xEE, 0x25, 0x69, 0x78, 0x02 };
+        static readonly byte[] IPluginFactoryFUID = new byte[] { 0x7A, 0x4D, 0x81, 0x1C, 0x52, 0x11, 0x4A, 0x1F, 0xAE, 0xD9, 0xD2, 0xEE, 0x0B, 0x43, 0xBF, 0x9F };
+        static readonly byte[] IPluginFactory2FUID = new byte[] { 0x00, 0x07, 0xB6, 0x50, 0xF2, 0x4B, 0x4C, 0x0B, 0xA4, 0x64, 0xED, 0xB9, 0xF0, 0x0B, 0x2A, 0xBB };
+        static readonly byte[] IEditControllerFUID = new byte[] { 0xDC, 0xD7, 0xBB, 0xE3, 0x77, 0x42, 0x44, 0x8D, 0xA8, 0x74, 0xAA, 0xCC, 0x97, 0x9C, 0x75, 0x9E };
+
+        // remember to create COM objects within a single thread (STA) 
+        [STAThread]
         static void Main(string[] args)
         {
             bool doVerbose = true;
@@ -604,23 +686,59 @@ namespace NetCoreVstHost
                     IntPtr factoryPtr = GetFactoryProc();
                     IntPtr factoryVtblPtr = Marshal.ReadIntPtr(factoryPtr, 0);
                     // IPluginFactory factory = (IPluginFactory)Marshal.PtrToStructure(factoryVtblPtr, typeof(IPluginFactory));
-                    IPluginFactory2 factory = (IPluginFactory2)Marshal.PtrToStructure(factoryVtblPtr, typeof(IPluginFactory2));
+                    IPluginFactory2 factory2 = (IPluginFactory2)Marshal.PtrToStructure(factoryVtblPtr, typeof(IPluginFactory2));
 
-                    IPluginFactoryGetFactoryInfoDelegate getFactoryInfo = (IPluginFactoryGetFactoryInfoDelegate)Marshal.GetDelegateForFunctionPointer(factory.getFactoryInfo, typeof(IPluginFactoryGetFactoryInfoDelegate));
-                    IPluginFactoryCountClassesDelegate countClasses = (IPluginFactoryCountClassesDelegate)Marshal.GetDelegateForFunctionPointer(factory.countClasses, typeof(IPluginFactoryCountClassesDelegate));
-                    IPluginFactoryGetClassInfoDelegate getClassInfo = (IPluginFactoryGetClassInfoDelegate)Marshal.GetDelegateForFunctionPointer(factory.getClassInfo, typeof(IPluginFactoryGetClassInfoDelegate));
-                    IPluginFactory2GetClassInfo2Delegate getClassInfo2 = (IPluginFactory2GetClassInfo2Delegate)Marshal.GetDelegateForFunctionPointer(factory.getClassInfo2, typeof(IPluginFactory2GetClassInfo2Delegate));
+                    IPluginFactoryGetFactoryInfoDelegate getFactoryInfo = (IPluginFactoryGetFactoryInfoDelegate)Marshal.GetDelegateForFunctionPointer(factory2.getFactoryInfo, typeof(IPluginFactoryGetFactoryInfoDelegate));
+                    IPluginFactoryCountClassesDelegate countClasses = (IPluginFactoryCountClassesDelegate)Marshal.GetDelegateForFunctionPointer(factory2.countClasses, typeof(IPluginFactoryCountClassesDelegate));
+                    IPluginFactoryGetClassInfoDelegate getClassInfo = (IPluginFactoryGetClassInfoDelegate)Marshal.GetDelegateForFunctionPointer(factory2.getClassInfo, typeof(IPluginFactoryGetClassInfoDelegate));
+                    IPluginFactory2GetClassInfo2Delegate getClassInfo2 = (IPluginFactory2GetClassInfo2Delegate)Marshal.GetDelegateForFunctionPointer(factory2.getClassInfo2, typeof(IPluginFactory2GetClassInfo2Delegate));
+                    IPluginFactoryCreateInstanceDelegate createInstance = (IPluginFactoryCreateInstanceDelegate)Marshal.GetDelegateForFunctionPointer(factory2.createInstance, typeof(IPluginFactoryCreateInstanceDelegate));
 
-                    IPluginFactoryCreateInstanceDelegate createInstance = (IPluginFactoryCreateInstanceDelegate)Marshal.GetDelegateForFunctionPointer(factory.createInstance, typeof(IPluginFactoryCreateInstanceDelegate));
-                    FUnknownReleaseDelegate factoryRelease = (FUnknownReleaseDelegate)Marshal.GetDelegateForFunctionPointer(factory.release, typeof(FUnknownReleaseDelegate));
+                    FUnknownReleaseDelegate factoryRelease = (FUnknownReleaseDelegate)Marshal.GetDelegateForFunctionPointer(factory2.release, typeof(FUnknownReleaseDelegate));
+                    FUnknownQueryInterfaceDelegate factoryQuery = (FUnknownQueryInterfaceDelegate)Marshal.GetDelegateForFunctionPointer(factory2.queryInterface, typeof(FUnknownQueryInterfaceDelegate));
 
                     PFactoryInfo fi = new PFactoryInfo();
                     getFactoryInfo(factoryPtr, ref fi);
                     if (doVerbose)
                     {
-                        Log.Debug("id: {0}, {1}, {2}, {3}", fi.flags, fi.vendor, fi.url, fi.email);
+                        Log.Debug("vendor: '{0}', url: '{1}', email: '{2}', flags: '{3}'", fi.vendor, fi.url, fi.email, fi.flags);
                     }
 
+                    // check what interfaces are implemented
+                    var unknown = new FUnknown();
+                    IntPtr unknownPtr = unknown.ToIntPtr();
+                    tresult queryRes;
+                    queryRes = factoryQuery(factoryPtr, IComponentFUID, ref unknownPtr);
+                    if (doVerbose)
+                    {
+                        Log.Debug("IComponentFUID interface query result: {0}", queryRes);
+                    }
+
+                    queryRes = factoryQuery(factoryPtr, FUnknownFUID, ref unknownPtr);
+                    if (doVerbose)
+                    {
+                        Log.Debug("FUnknownFUID interface query result: {0}", queryRes);
+                    }
+
+                    queryRes = factoryQuery(factoryPtr, IPluginFactoryFUID, ref unknownPtr);
+                    if (doVerbose)
+                    {
+                        Log.Debug("IPluginFactoryFUID interface query result: {0}", queryRes);
+                    }
+
+                    queryRes = factoryQuery(factoryPtr, IPluginFactory2FUID, ref unknownPtr);
+                    if (doVerbose)
+                    {
+                        Log.Debug("IPluginFactory2FUID interface query result: {0}", queryRes);
+                    }
+
+                    queryRes = factoryQuery(factoryPtr, IEditControllerFUID, ref unknownPtr);
+                    if (doVerbose)
+                    {
+                        Log.Debug("IEditControllerFUID interface query result: {0}", queryRes);
+                    }
+
+                    // count classes
                     var numClasses = countClasses(factoryPtr);
                     for (int i = 0; i < numClasses; i++)
                     {
@@ -637,11 +755,11 @@ namespace NetCoreVstHost
 
                         if (ci.category == kVstAudioEffectClass)
                         {
-                            Log.Information("Found processor ('{0}') for: {1}", ci.category, ci.name);
+                            Log.Information("Found Audio Processor ('{0}') for: {1}", ci.category, ci.name);
 
                             IComponent placeholderComp = new IComponent();
                             IntPtr compPtr = placeholderComp.ToIntPtr();
-                            createInstance(factoryPtr, ci.cid, ci.cid, ref compPtr);
+                            createInstance(factoryPtr, ci.cid, FUnknownFUID, ref compPtr);
                             IntPtr compVtblPtr = Marshal.ReadIntPtr(compPtr, 0);
                             IComponent comp = (IComponent)Marshal.PtrToStructure(compVtblPtr, typeof(IComponent));
 
@@ -668,12 +786,27 @@ namespace NetCoreVstHost
                             IComponentGetBusInfoDelegate getBusInfo = (IComponentGetBusInfoDelegate)Marshal.GetDelegateForFunctionPointer(comp.getBusInfo, typeof(IComponentGetBusInfoDelegate));
                             IComponentGetControllerClassIdDelegate getControllerClassId = (IComponentGetControllerClassIdDelegate)Marshal.GetDelegateForFunctionPointer(comp.getControllerClassId, typeof(IComponentGetControllerClassIdDelegate));
                             IComponentGetRoutingInfoDelegate getRoutingInfo = (IComponentGetRoutingInfoDelegate)Marshal.GetDelegateForFunctionPointer(comp.getRoutingInfo, typeof(IComponentGetRoutingInfoDelegate));
+                            IComponentSetIoModeDelegate setIoMode = (IComponentSetIoModeDelegate)Marshal.GetDelegateForFunctionPointer(comp.setIoMode, typeof(IComponentSetIoModeDelegate));
 
-                            // var unknownArray = new FUnknown[1];
-                            // unknownArray[0] = new FUnknown();
-                            // IntPtr unknownPtr = unknownArray.ToIntPtr();
-                            // initialize(compPtr, ref unknownPtr);
+                            // now `comp` shall be valid pointer of Vst::IComponent.
 
+                            // initialize comp
+                            tresult setIoModeRes = setIoMode(compPtr, IoModes.kAdvanced);
+                            if (doVerbose)
+                            {
+                                Log.Debug("setIoMode: {0}", setIoModeRes);
+                            }
+
+                            // you should define host context object before and pass it here as `FUnknown *`.
+                            // the host context object is the class which normally derives Vst::IHostApplication,
+                            // Vst::IComponentHandler, Vst::IPluginInterfaceSupport, etc.
+                            // comp->initialize(host_context);
+
+                            // find the relevent IEditController class id
+                            // (in detail, IEditController interface may be obtained from IComponent directly if the plugin
+                            //  derives SingleComponentEffect.
+                            //  For such plugins, do not use this method and obtain IEditController with `comp->queryInstance()`
+                            // )                            
                             var classIdBytes = new byte[16];
                             getControllerClassId(compPtr, classIdBytes);
 
@@ -682,7 +815,7 @@ namespace NetCoreVstHost
                                 Log.Debug("ControllerClassId: '{0}'", Encoding.Default.GetString(classIdBytes));
                             }
 
-
+                            // bus count
                             int busCount = getBusCount(compPtr, MediaTypes.kAudio, BusDirections.kInput);
 
                             if (doVerbose)
@@ -690,7 +823,7 @@ namespace NetCoreVstHost
                                 Log.Debug("BusCount: {0}", busCount);
                             }
 
-
+                            // bus info
                             BusInfo bus = new BusInfo();
                             getBusInfo(compPtr, MediaTypes.kAudio, BusDirections.kInput, 0, ref bus);
 
@@ -710,11 +843,11 @@ namespace NetCoreVstHost
                         }
                         else
                         {
-                            Log.Information("Found '{0}' for: {1}", ci.category, ci.name);
+                            Log.Information("Found Other ('{0}') for: {1}", ci.category, ci.name);
 
                             FUnknown placeholderObj = new FUnknown();
                             IntPtr objPtr = placeholderObj.ToIntPtr();
-                            createInstance(factoryPtr, ci.cid, ci.cid, ref objPtr);
+                            createInstance(factoryPtr, ci.cid, FUnknownFUID, ref objPtr);
                             IntPtr objVtblPtr = Marshal.ReadIntPtr(objPtr, 0);
                             FUnknown obj = (FUnknown)Marshal.PtrToStructure(objVtblPtr, typeof(FUnknown));
 
@@ -727,7 +860,7 @@ namespace NetCoreVstHost
                             }
 
                             FUnknownReleaseDelegate instanceRelease = (FUnknownReleaseDelegate)Marshal.GetDelegateForFunctionPointer(obj.release, typeof(FUnknownReleaseDelegate));
-                            int instanceRelRes = instanceRelease(objPtr);
+                            tresult instanceRelRes = instanceRelease(objPtr);
                             if (doVerbose)
                             {
                                 Log.Debug("releasing instance: {0}", instanceRelRes);
@@ -735,7 +868,7 @@ namespace NetCoreVstHost
                         }
                     }
 
-                    int factoryRelRes = factoryRelease(factoryPtr);
+                    tresult factoryRelRes = factoryRelease(factoryPtr);
                     if (doVerbose)
                     {
                         Log.Debug("releasing factory: {0}", factoryRelRes);
